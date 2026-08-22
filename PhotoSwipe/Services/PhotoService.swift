@@ -62,6 +62,7 @@ final class PhotoService: ObservableObject {
 
         for i in 0..<newPhotos.count {
             newPhotos[i].uiImage = await requestImage(for: newPhotos[i].asset)
+            newPhotos[i].thumbnailImage = await requestThumbnail(for: newPhotos[i].asset)
             loadedCount = i + 1
         }
 
@@ -93,6 +94,29 @@ final class PhotoService: ObservableObject {
         let options = PHImageRequestOptions()
         options.isSynchronous = false
         options.deliveryMode = .highQualityFormat
+        options.resizeMode = .fast
+        options.isNetworkAccessAllowed = true
+
+        return await withCheckedContinuation { continuation in
+            imageManager.requestImage(
+                for: asset,
+                targetSize: targetSize,
+                contentMode: .aspectFill,
+                options: options
+            ) { image, _ in
+                continuation.resume(returning: image)
+            }
+        }
+    }
+
+    /// 加载小尺寸缩略图（用于背景模糊，性能开销极小）
+    private func requestThumbnail(for asset: PHAsset) async -> UIImage? {
+        let imageManager = PHImageManager.default()
+        let targetSize = CGSize(width: 80, height: 80)
+
+        let options = PHImageRequestOptions()
+        options.isSynchronous = false
+        options.deliveryMode = .fastFormat
         options.resizeMode = .fast
         options.isNetworkAccessAllowed = true
 

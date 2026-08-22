@@ -8,7 +8,7 @@ struct SwipeView: View {
     @State private var currentIndex: Int = 0
     @State private var actions: [SwipeAction] = []
     @State private var flyingDirection: SwipeDirection = .idle
-    @State private var showDeleteReview = false
+    @State private var showDeleteConfirm = false
     @State private var swipedIds: Set<String> = []
     @State private var favoriteIds: Set<String> = []
     @State private var classifyIds: Set<String> = []
@@ -34,18 +34,22 @@ struct SwipeView: View {
             } else if currentIndex >= service.photos.count {
                 resultView
             } else {
-                VStack(spacing: 0) {
-                    topBar
-                        .padding(.top, 16)
-
-                    Spacer(minLength: 12)
-
+                ZStack(alignment: .center) {
                     cardStack
 
-                    Spacer(minLength: 12)
+                    // 顶部按钮栏
+                    VStack {
+                        topBar
+                            .padding(.top, 16)
+                        Spacer()
+                    }
 
-                    bottomBar
-                        .padding(.bottom, 20)
+                    // 底部按钮栏
+                    VStack {
+                        Spacer()
+                        bottomBar
+                            .padding(.bottom, 24)
+                    }
                 }
             }
         }
@@ -64,12 +68,6 @@ struct SwipeView: View {
                 onFinish: { showTutorial = false }
             )
         }
-        .sheet(isPresented: $showDeleteReview) {
-            DeleteReviewView(
-                photos: service.pendingDeletes,
-                onConfirm: handleDeleteConfirm
-            )
-        }
         .alert("提前结束整理？", isPresented: $showEarlyFinishConfirm) {
             Button("提前结束", role: .destructive) {
                 withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
@@ -79,6 +77,17 @@ struct SwipeView: View {
             Button("继续整理", role: .cancel) {}
         } message: {
             Text("已整理的 \(actions.count) 张照片将保留处理，剩余照片下次继续。")
+        }
+        .alert("确认删除？", isPresented: $showDeleteConfirm) {
+            Button("删除", role: .destructive) {
+                Task {
+                    _ = await service.batchDelete()
+                    actions.removeAll { $0.direction == .up }
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("确定要删除选中的 \(service.pendingDeletes.count) 张照片吗？删除后无法恢复。")
         }
         .sheet(item: $classifySession) { session in
             AlbumClassificationView(photos: session.photos, service: service)
@@ -104,6 +113,45 @@ struct SwipeView: View {
         }
     }
 
+    // MARK: - 模糊照片背景（苹果壁纸风格）
+
+    @ViewBuilder
+    private var gradientBackground: some View {
+        if currentIndex < service.photos.count,
+           let image = service.photos[currentIndex].thumbnailImage {
+            GeometryReader { geo in
+                ZStack {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .scaleEffect(1.2)
+                        .blur(radius: 40, opaque: true)
+                        .opacity(0.7)
+
+                    // 暗色叠加，保证内容清晰
+                    Color.black.opacity(0.4)
+
+                    // 顶部渐暗，增加层次感
+                    LinearGradient(
+                        colors: [
+                            Color.black.opacity(0.25),
+                            Color.clear,
+                            Color.black.opacity(0.15)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                }
+                .frame(width: geo.size.width, height: geo.size.height)
+            }
+            .ignoresSafeArea()
+            .id(currentIndex)
+            .transition(.opacity)
+            .animation(.easeInOut(duration: 0.45), value: currentIndex)
+        }
+    }
+
     // MARK: - Top Bar
 
     private var canUndo: Bool {
@@ -111,57 +159,79 @@ struct SwipeView: View {
     }
 
     private var topBar: some View {
-        HStack {
+        HStack(spacing: 10) {
             Button(action: { showEarlyFinishConfirm = true }) {
                 HStack(spacing: 6) {
                     Image(systemName: "flag.checkered")
                     Text("提前结束")
                 }
-                .font(.subheadline.weight(.semibold))
-                .foregroundColor(.white)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(Color.blue)
-                .clipShape(Capsule())
+                .font(.subheadline.weight(.medium))
+                .foregroundColor(.white.opacity(0.9))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(
+                    Capsule()
+                        .fill(Color.white.opacity(0.08))
+                )
+                .overlay(
+                    Capsule()
+                        .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+                )
             }
 
             Spacer()
 
             if service.pendingDeletes.count > 0 {
-                Button(action: { showDeleteReview = true }) {
+                Button(action: { showDeleteConfirm = true }) {
                     HStack(spacing: 6) {
                         Image(systemName: "trash.fill")
                         Text("\(service.pendingDeletes.count)")
                     }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(Color.red.opacity(0.8))
-                    .clipShape(Capsule())
+                    .font(.subheadline.weight(.medium))
+                    .foregroundColor(.white.opacity(0.9))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(
+                        Capsule()
+                            .fill(Color.red.opacity(0.7))
+                    )
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                    )
                 }
-                .transition(.opacity)
+                .transition(.opacity.combined(with: .scale))
             }
 
             Button(action: { showTutorial = true }) {
-                Image(systemName: "questionmark.circle")
-                    .font(.headline)
-                    .foregroundColor(.white.opacity(0.6))
-                    .padding(10)
-                    .background(Color.white.opacity(0.1))
-                    .clipShape(Circle())
+                Image(systemName: "questionmark")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundColor(.white.opacity(0.7))
+                    .frame(width: 36, height: 36)
+                    .background(
+                        Circle()
+                            .fill(Color.white.opacity(0.08))
+                    )
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+                    )
             }
-            .padding(.leading, 8)
 
             Button(action: { showShareSheet = true }) {
                 Image(systemName: "square.and.arrow.up")
-                    .font(.headline)
-                    .foregroundColor(.white.opacity(0.6))
-                    .padding(10)
-                    .background(Color.white.opacity(0.1))
-                    .clipShape(Circle())
+                    .font(.subheadline.weight(.medium))
+                    .foregroundColor(.white.opacity(0.7))
+                    .frame(width: 36, height: 36)
+                    .background(
+                        Circle()
+                            .fill(Color.white.opacity(0.08))
+                    )
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+                    )
             }
-            .padding(.leading, 8)
         }
         .padding(.horizontal, 20)
     }
@@ -171,18 +241,25 @@ struct SwipeView: View {
             if canUndo {
                 Button(action: undoLastAction) {
                     Image(systemName: "arrow.uturn.backward")
-                        .font(.title3.weight(.semibold))
-                        .foregroundColor(.white.opacity(0.7))
-                        .padding(12)
-                        .background(Color.white.opacity(0.1))
-                        .clipShape(Circle())
+                        .font(.subheadline.weight(.medium))
+                        .foregroundColor(.white.opacity(0.75))
+                        .frame(width: 42, height: 42)
+                        .background(
+                            Circle()
+                                .fill(Color.white.opacity(0.08))
+                        )
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+                        )
                 }
                 .transition(.scale.combined(with: .opacity))
             }
 
-            Text("\(currentIndex + 1)/\(service.photos.count)")
-                .font(.subheadline.weight(.medium))
-                .foregroundColor(.white.opacity(0.5))
+            Text("\(currentIndex + 1) / \(service.photos.count)")
+                .font(.caption.weight(.medium))
+                .foregroundColor(.white.opacity(0.45))
+                .monospacedDigit()
 
             Spacer()
         }
@@ -198,7 +275,6 @@ struct SwipeView: View {
                 id: \.element.id
             ) { index, photo in
                 let depth = index - currentIndex
-                // 只显示当前这一张，下一张在滑走前都不渲染
                 if depth == 0 && !swipedIds.contains(photo.id) {
                     PhotoCardView(
                         photo: photo,
@@ -220,72 +296,21 @@ struct SwipeView: View {
         }
     }
 
-    /// 背景：从照片提取主色做渐变，GPU 零开销
-    @ViewBuilder
-    private var gradientBackground: some View {
-        if currentIndex < service.photos.count,
-           let image = service.photos[currentIndex].uiImage {
-            let uiColor = image.averageColor
-            let color = Color(uiColor: uiColor)
-
-            ZStack {
-                // 主色渐变（顶部深 → 底部稍亮）
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        color.opacity(0.35),
-                        color.opacity(0.15)
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-
-                // 紫色氛围叠加
-                RadialGradient(
-                    gradient: Gradient(colors: [
-                        Color.purple.opacity(0.25),
-                        Color.clear
-                    ]),
-                    center: .topTrailing,
-                    startRadius: 50,
-                    endRadius: 400
-                )
-
-                // 蓝色氛围叠加
-                RadialGradient(
-                    gradient: Gradient(colors: [
-                        Color.blue.opacity(0.2),
-                        Color.clear
-                    ]),
-                    center: .bottomLeading,
-                    startRadius: 50,
-                    endRadius: 500
-                )
-            }
-            .ignoresSafeArea()
-            .id(currentIndex)
-            .transition(.opacity)
-            .animation(.easeInOut(duration: 0.4), value: currentIndex)
-        }
-    }
-
     private var cardMaxWidth: CGFloat {
-        UIScreen.main.bounds.width - 32
+        UIScreen.main.bounds.width - 40
     }
 
     private var cardMaxHeight: CGFloat {
-        UIScreen.main.bounds.height * 0.72
+        UIScreen.main.bounds.height * 0.67
     }
 
-    /// 方案A：按照片真实宽高比，在最大尺寸内尽量大且完整显示（不裁剪、不留黑边）
     private func fittedCardWidth(_ photo: PhotoItem) -> CGFloat {
         let ratio = clampedRatio(photo.aspectRatio)
         if ratio >= 1 {
-            // 横图/方图：宽优先
             let w = cardMaxWidth
             let h = w / ratio
             return h <= cardMaxHeight ? w : cardMaxHeight * ratio
         } else {
-            // 竖图：高优先
             let h = cardMaxHeight
             let w = h * ratio
             return w <= cardMaxWidth ? w : cardMaxWidth
@@ -303,7 +328,6 @@ struct SwipeView: View {
     }
 
     private func clampedRatio(_ r: CGFloat) -> CGFloat {
-        // 限制极端比例，避免超长全景图或超高长条图卡片过小
         min(max(r, 0.5), 2.4)
     }
 
@@ -332,11 +356,11 @@ struct SwipeView: View {
     private var emptyState: some View {
         VStack(spacing: 16) {
             Image(systemName: "photo.on.rectangle.angled")
-                .font(.system(size: 60))
-                .foregroundColor(.gray)
+                .font(.system(size: 54))
+                .foregroundColor(.white.opacity(0.5))
             Text("相册是空的")
                 .font(.title3.weight(.medium))
-                .foregroundColor(.gray)
+                .foregroundColor(.white.opacity(0.6))
         }
     }
 
@@ -346,7 +370,14 @@ struct SwipeView: View {
             keepPhotos: currentGroupKeepPhotos,
             favoritePhotos: currentGroupFavoritePhotos,
             classifyPhotos: currentGroupClassifyPhotos,
-            onConfirmDelete: { showDeleteReview = true },
+            onConfirmDelete: {
+                Task {
+                    let success = await service.batchDelete()
+                    if success {
+                        actions.removeAll { $0.direction == .up }
+                    }
+                }
+            },
             onRestart: restart,
             onClassify: {
                 classifySession = ClassifySession(photos: currentGroupClassifyPhotos)
@@ -363,34 +394,15 @@ struct SwipeView: View {
             },
             onRemoveClassify: { ids in
                 actions.removeAll { $0.direction == .left && ids.contains($0.photoId) }
-            }
+            },
+            onRemoveDelete: { ids in
+                actions.removeAll { $0.direction == .up && ids.contains($0.photoId) }
+                service.removeFromPendingDeletes(ids)
+            },
         )
     }
 
     // MARK: - Logic
-
-    private func handleDragEnd(_ translation: CGSize) {
-        let absX = abs(translation.width)
-        let absY = abs(translation.height)
-
-        if absY > swipeThreshold && absY >= absX {
-            if translation.height < 0 {
-                handleSwipe(.up)
-            } else {
-                handleSwipe(.down)
-            }
-        } else if absX > swipeThreshold && absX > absY {
-            if translation.width > 0 {
-                handleSwipe(.right)
-            } else {
-                handleSwipe(.left)
-            }
-        } else {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                dragOffset = .zero
-            }
-        }
-    }
 
     private func handleSwipe(_ direction: SwipeDirection) {
         guard currentIndex < service.photos.count else { return }
@@ -431,40 +443,12 @@ struct SwipeView: View {
             break
         }
 
-        withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) {
-            switch direction {
-            case .up:
-                dragOffset = CGSize(width: 0, height: -UIScreen.main.bounds.height)
-            case .down:
-                dragOffset = CGSize(width: 0, height: UIScreen.main.bounds.height)
-            case .left:
-                dragOffset = CGSize(width: -UIScreen.main.bounds.width, height: 0)
-            case .right:
-                dragOffset = CGSize(width: UIScreen.main.bounds.width, height: 0)
-            case .idle:
-                break
-            }
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
             dragOffset = .zero
             flyingDirection = .idle
             currentIndex += 1
             Task {
                 await service.preloadNext(currentIndex: currentIndex)
-            }
-        }
-    }
-
-    private func handleDeleteConfirm(_ selectedIds: Set<String>) {
-        let uncheckedIds = Set(service.pendingDeletes.filter { !selectedIds.contains($0.id) }.map { $0.id })
-        service.removeFromPendingDeletes(uncheckedIds)
-        actions.removeAll { $0.direction == .up && uncheckedIds.contains($0.photoId) }
-
-        Task {
-            let success = await service.batchDelete()
-            if success {
-                actions.removeAll { $0.direction == .up }
             }
         }
     }
@@ -571,7 +555,7 @@ struct SwipeView: View {
     }
 }
 
-/// 分类会话：承载待分类照片，用于 sheet 呈现（避免闭包捕获旧值导致首屏空白）
+/// 分类会话：承载待分类照片，用于 sheet 呈现
 struct ClassifySession: Identifiable {
     let id = UUID()
     let photos: [PhotoItem]
@@ -587,5 +571,3 @@ struct ShareSheet: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
-// v1.0 演示标记
-// v1.1 演示标记

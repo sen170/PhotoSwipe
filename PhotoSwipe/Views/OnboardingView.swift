@@ -288,41 +288,93 @@ struct LoadingView: View {
 
     @State private var isLoading = true
     @State private var floating = false
-    @State private var exited = [false, false, false, false]   // 依次飞出
+    @State private var exited = [false, false, false, false]
     @State private var fadeOut = false
     @State private var didFinish = false
+    @State private var pulse = false
 
-    // 每支箭头指向自己要飞出的方向；fly 沿箭头指向直线飞出
+    // 每支箭头指向自己要飞出的方向
     private let arrows: [(angle: Double, pos: CGSize, float: CGSize, fly: CGSize)] = [
-        (angle: -90, pos: CGSize(width: 0, height: -120), float: CGSize(width: 6, height: -14), fly: CGSize(width: 0, height: -720)),
-        (angle: 90,  pos: CGSize(width: 0, height: 120),  float: CGSize(width: -6, height: 14),  fly: CGSize(width: 0, height: 720)),
-        (angle: 180, pos: CGSize(width: -120, height: 0), float: CGSize(width: -14, height: 6), fly: CGSize(width: -720, height: 0)),
-        (angle: 0,   pos: CGSize(width: 120, height: 0),  float: CGSize(width: 14, height: -6), fly: CGSize(width: 720, height: 0)),
+        (angle: -90, pos: CGSize(width: 0, height: -100), float: CGSize(width: 4, height: -10), fly: CGSize(width: 0, height: -600)),
+        (angle: 90,  pos: CGSize(width: 0, height: 100),  float: CGSize(width: -4, height: 10),  fly: CGSize(width: 0, height: 600)),
+        (angle: 180, pos: CGSize(width: -100, height: 0), float: CGSize(width: -10, height: 4), fly: CGSize(width: -600, height: 0)),
+        (angle: 0,   pos: CGSize(width: 100, height: 0),  float: CGSize(width: 10, height: -4), fly: CGSize(width: 600, height: 0)),
     ]
 
     var body: some View {
         ZStack {
-            Color.white.ignoresSafeArea()
+            // 深色背景
+            Color.black.ignoresSafeArea()
 
-            // 四支玻璃箭头，指向各自飞出方向
+            // 中心柔和光晕
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [
+                            Color.white.opacity(0.08),
+                            Color.clear
+                        ],
+                        center: .center,
+                        startRadius: 10,
+                        endRadius: 180
+                    )
+                )
+                .scaleEffect(pulse ? 1.1 : 0.9)
+                .opacity(pulse ? 1 : 0.6)
+                .animation(.easeInOut(duration: 2.5).repeatForever(autoreverses: true), value: pulse)
+
+            // 四支箭头
             ForEach(arrows.indices, id: \.self) { i in
                 arrowView(i)
             }
 
-            // 底部进度文字
+            // 中心图标
+            Image(systemName: "photo.stack")
+                .font(.system(size: 38, weight: .light))
+                .foregroundColor(.white.opacity(0.6))
+                .opacity(fadeOut ? 0 : 1)
+                .animation(.easeInOut(duration: 0.4), value: fadeOut)
+
+            // 底部进度
             VStack {
                 Spacer()
-                Text(isLoading ? "正在加载照片 \(service.loadedCount) / \(service.totalCount)" : "准备就绪…")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundColor(.black.opacity(isLoading ? 0.45 : 0))
+                VStack(spacing: 12) {
+                    // 进度环
+                    ZStack {
+                        Circle()
+                            .stroke(Color.white.opacity(0.1), lineWidth: 2)
+                            .frame(width: 36, height: 36)
+
+                        Circle()
+                            .trim(from: 0, to: progressValue)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [.white.opacity(0.8), .white.opacity(0.4)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                ),
+                                style: StrokeStyle(lineWidth: 2, lineCap: .round)
+                            )
+                            .frame(width: 36, height: 36)
+                            .rotationEffect(.degrees(-90))
+                            .animation(.easeOut(duration: 0.2), value: progressValue)
+                    }
                     .opacity(fadeOut ? 0 : 1)
-                    .animation(.easeInOut(duration: 0.3), value: isLoading)
+
+                    Text(statusText)
+                        .font(.caption.weight(.medium))
+                        .foregroundColor(.white.opacity(0.5))
+                        .opacity(fadeOut ? 0 : 1)
+                        .animation(.easeInOut(duration: 0.3), value: isLoading)
+                }
             }
-            .padding(.bottom, 56)
+            .padding(.bottom, 80)
         }
         .opacity(fadeOut ? 0 : 1)
+        .preferredColorScheme(.dark)
         .onAppear {
-            withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) {
+            pulse = true
+            withAnimation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true)) {
                 floating = true
             }
         }
@@ -333,18 +385,31 @@ struct LoadingView: View {
         }
     }
 
+    private var progressValue: Double {
+        guard service.totalCount > 0 else { return 0 }
+        return Double(service.loadedCount) / Double(service.totalCount)
+    }
+
+    private var statusText: String {
+        if isLoading {
+            return "正在整理照片 \(service.loadedCount) / \(service.totalCount)"
+        } else {
+            return "准备就绪"
+        }
+    }
+
     private func arrowView(_ i: Int) -> some View {
         let a = arrows[i]
         let baseFloat = floating ? a.float : .zero
         let flyOffset = exited[i] ? a.fly : .zero
 
-        return FatArrow()
-            .frame(width: 64, height: 74)
+        return SlimArrow()
+            .frame(width: 28, height: 14)
             .rotationEffect(.degrees(a.angle))
             .offset(x: a.pos.width + baseFloat.width + flyOffset.width,
                     y: a.pos.height + baseFloat.height + flyOffset.height)
-            .opacity(exited[i] ? 0 : 1)
-            .animation(.easeOut(duration: 0.9), value: exited[i])
+            .opacity(exited[i] ? 0 : 0.7)
+            .animation(.easeOut(duration: 0.7), value: exited[i])
     }
 
     private func startExitSequence() {
@@ -352,83 +417,56 @@ struct LoadingView: View {
         didFinish = true
         isLoading = false
 
-        // 一个一个依次沿箭头指向方向直线飞出（0.2s 一个）
         for i in 0..<arrows.count {
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.2) {
-                withAnimation(.easeInOut(duration: 0.6)) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.15) {
+                withAnimation(.easeOut(duration: 0.8)) {
                     exited[i] = true
                 }
             }
         }
 
-        // 全程约 0.2*3+0.6 ≈ 1.2s，之后渐隐
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) {
-            withAnimation(.easeInOut(duration: 0.4)) { fadeOut = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+            withAnimation(.easeInOut(duration: 0.5)) { fadeOut = true }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             onFinished()
         }
     }
 }
 
-/// 厚实立体的箭头：靛青渐变 + 顶部高光 + 白描边，圆润精致，默认指向右侧
-struct FatArrow: View {
+/// 简约精致的箭头：线性渐变，纤细优雅，指向右侧
+struct SlimArrow: View {
     private let gradient = LinearGradient(
         colors: [
-            Color(red: 0.20, green: 0.50, blue: 0.98),
-            Color(red: 0.24, green: 0.82, blue: 0.94)
+            Color.white.opacity(0.5),
+            Color.white.opacity(0.9)
         ],
-        startPoint: .top,
-        endPoint: .bottom
+        startPoint: .leading,
+        endPoint: .trailing
     )
-    private let gloss = LinearGradient(
-        stops: [
-            .init(color: Color.white.opacity(0.35), location: 0),
-            .init(color: .white.opacity(0.0), location: 0.60),
-            .init(color: .white.opacity(0.0), location: 1)
-        ],
-        startPoint: .top,
-        endPoint: .bottom
-    )
-    private let rim = Color.white.opacity(0.85)
-    private let shadow = Color(red: 0.15, green: 0.42, blue: 0.90).opacity(0.32)
 
     var body: some View {
-        ZStack {
-            // 主色 + 顶部高光，都裁剪到箭头轮廓，保证渐变与光泽连续无接缝
-            Rectangle().fill(gradient).mask(Arrow())
-            Rectangle().fill(gloss).mask(Arrow())
-            Arrow().stroke(rim, lineWidth: 1.6)
-        }
-        .frame(width: 58, height: 48)
-        .shadow(color: shadow, radius: 9, x: 0, y: 5)
+        ArrowShape()
+            .fill(gradient)
+            .shadow(color: .white.opacity(0.3), radius: 6, x: 0, y: 0)
     }
 }
 
-/// 单支标准箭头：头部为清晰 V 形，箭杆偏细且带圆润尾端
-struct Arrow: Shape {
+/// 纤细箭头形状
+struct ArrowShape: Shape {
     func path(in rect: CGRect) -> Path {
         let w = rect.width
         let h = rect.height
-        let mid = h / 2
-        let hx = w * 0.60        // 头部基底横坐标
-        let top = h * 0.06       // 头部上角
-        let bot = h * 0.94       // 头部下角
-        let sy = h * 0.33        // 箭杆上沿
-        let sbot = h * 0.67      // 箭杆下沿
-        let tx = w * 0.07        // 箭杆尾端横坐标
-        let r = min(w * 0.05, h * 0.12)   // 尾端圆角半径
+        let midY = h / 2
 
-        var p = Path()
-        p.move(to: CGPoint(x: w, y: mid))                  // 尖端
-        p.addLine(to: CGPoint(x: hx, y: top))              // 头部上沿
-        p.addLine(to: CGPoint(x: hx, y: sy))               // 头→杆台阶
-        p.addLine(to: CGPoint(x: tx, y: sy))               // 箭杆上沿
-        p.addQuadCurve(to: CGPoint(x: tx, y: sbot),
-                       control: CGPoint(x: tx - r, y: mid)) // 圆润尾端
-        p.addLine(to: CGPoint(x: hx, y: sbot))             // 箭杆下沿
-        p.addLine(to: CGPoint(x: hx, y: bot))              // 头→杆台阶
-        p.closeSubpath()                                    // 头部下沿 → 尖端
-        return p
+        var path = Path()
+        path.move(to: CGPoint(x: 0, y: midY))
+        path.addLine(to: CGPoint(x: w * 0.65, y: midY))
+        path.addLine(to: CGPoint(x: w * 0.65, y: 0))
+        path.addLine(to: CGPoint(x: w, y: midY))
+        path.addLine(to: CGPoint(x: w * 0.65, y: h))
+        path.addLine(to: CGPoint(x: w * 0.65, y: midY))
+        path.closeSubpath()
+        return path
     }
 }

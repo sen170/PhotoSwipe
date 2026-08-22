@@ -14,6 +14,7 @@ struct PhotoItem: Identifiable {
     let id: String
     let asset: PHAsset
     var uiImage: UIImage?
+    var thumbnailImage: UIImage?
     var aspectRatio: CGFloat = 3.0 / 4.0   // 宽/高，默认接近屏幕卡片
 }
 

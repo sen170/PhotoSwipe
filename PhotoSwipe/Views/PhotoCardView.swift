@@ -51,16 +51,17 @@ struct PhotoCardView: View {
 
             overlay
         }
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(alignment: .bottom) {
             if let date = photo.asset.creationDate {
                 Text(Self.dateFormatter.string(from: date))
-                    .font(.subheadline.weight(.medium))
-                    .foregroundColor(.white.opacity(0.8))
-                    .offset(y: 28)
+                    .font(.caption.weight(.medium))
+                    .foregroundColor(.white.opacity(0.7))
+                    .offset(y: 26)
             }
         }
-        .shadow(color: Color.black.opacity(0.3), radius: 8, x: 0, y: 4)
+        .shadow(color: Color.black.opacity(0.25), radius: 24, x: 0, y: 12)
+        .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
         .offset(x: dragOffset.width, y: dragOffset.height)
         .rotationEffect(.degrees(-rotation))
         .scaleEffect(scaleAmount)
@@ -129,15 +130,21 @@ struct PhotoCardView: View {
     private func labelBadge(text: String, color: Color, icon: String) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.title2.weight(.bold))
+                .font(.title3.weight(.semibold))
             Text(text)
-                .font(.title2.weight(.bold))
+                .font(.title3.weight(.semibold))
         }
         .foregroundColor(.white)
-        .padding(.horizontal, 24)
-        .padding(.vertical, 12)
-        .background(color.opacity(0.85))
-        .clipShape(Capsule())
-        .overlay(Capsule().stroke(Color.white.opacity(0.3), lineWidth: 1))
+        .padding(.horizontal, 22)
+        .padding(.vertical, 11)
+        .background(
+            Capsule()
+                .fill(color.opacity(0.9))
+        )
+        .overlay(
+            Capsule()
+                .stroke(Color.white.opacity(0.25), lineWidth: 0.5)
+        )
+        .shadow(color: color.opacity(0.3), radius: 12, x: 0, y: 6)
     }
 }

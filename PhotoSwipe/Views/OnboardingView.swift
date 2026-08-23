@@ -6,7 +6,6 @@ struct RootView: View {
     @State private var showOnboarding = true
     @State private var showOnboardingTutorial = false
     @State private var showPermissionDenied = false
-    @State private var loadFinished = false
 
     private var hasCompletedTutorial: Bool {
         UserDefaults.standard.bool(forKey: "hasCompletedTutorial")
@@ -21,12 +20,6 @@ struct RootView: View {
                     onStart: startOrganizing,
                     onShowTutorial: { showOnboardingTutorial = true }
                 )
-            } else if !loadFinished {
-                LoadingView(service: service) {
-                    withAnimation(.easeInOut(duration: 0.4)) {
-                        loadFinished = true
-                    }
-                }
             } else if !hasCompletedTutorial {
                 TutorialView(
                     isFirstRun: true,
@@ -35,7 +28,7 @@ struct RootView: View {
                     }
                 )
             } else {
-                SwipeView(service: service)
+                MainTabView(service: service)
             }
         }
         // 「新手教程」按钮：以全屏浮现的方式播放教程，结束后回到本页
@@ -54,7 +47,7 @@ struct RootView: View {
         }
     }
 
-    // 「开始整理」：申请权限 → 挂载加载页 → 加载照片 → 进入主流程
+    // 「开始整理」：申请权限 → 进入导航页
     private func startOrganizing() {
         Task {
             await service.requestPermission()
@@ -64,15 +57,9 @@ struct RootView: View {
                 return
             }
 
-            // 先挂载 LoadingView，再开始加载，确保其能监听到 isLoading 变化并退出
             withAnimation(.easeInOut(duration: 0.4)) {
                 showOnboarding = false
             }
-            // 等一拍让加载页完成渲染，再触发加载
-            try? await Task.sleep(nanoseconds: 80_000_000)
-
-            let saved = UserDefaults.standard.array(forKey: "swipedPhotoIds") as? [String] ?? []
-            await service.loadPhotos(swipedIds: Set(saved))
         }
     }
 }
@@ -159,7 +146,8 @@ struct OnboardingView: View {
         VStack(spacing: 10) {
             tipRow(icon: "arrow.up", color: .red, title: "上滑", desc: "删除不需要的照片")
             tipRow(icon: "arrow.down", color: .green, title: "下滑", desc: "保留喜欢的照片")
-            tipRow(icon: "arrow.right", color: .yellow, title: "右滑", desc: "收藏喜欢的照片")
+            tipRow(icon: "hand.tap.fill", color: .yellow, title: "双击", desc: "收藏喜欢的照片")
+            tipRow(icon: "arrow.right", color: .blue, title: "右滑", desc: "标记为稍后复看")
             tipRow(icon: "arrow.left", color: .orange, title: "左滑", desc: "加入待分类，可放到指定相簿")
             tipRow(icon: "lock.fill", color: .blue, title: "隐私安全", desc: "所有操作仅在本地完成")
         }

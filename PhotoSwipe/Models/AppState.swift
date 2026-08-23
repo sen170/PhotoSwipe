@@ -7,6 +7,7 @@ enum SwipeDirection {
     case down
     case left
     case right
+    case doubleTap
     case idle
 }
 
@@ -22,4 +23,13 @@ struct AlbumInfo: Identifiable {
     let id: String
     let name: String
     let collection: PHAssetCollection
+}
+
+struct MonthlyGroup: Identifiable {
+    let id: String        // "2026-08"
+    let year: Int
+    let month: Int
+    let photoCount: Int
+    var coverImage: UIImage?
+    var coverAsset: PHAsset?
 }

@@ -5,6 +5,7 @@ struct ResultView: View {
     let keepPhotos: [PhotoItem]
     let favoritePhotos: [PhotoItem]
     let classifyPhotos: [PhotoItem]
+    let reviewPhotos: [PhotoItem]
     var onConfirmDelete: () -> Void
     var onRestart: () -> Void
     var onClassify: () -> Void
@@ -13,12 +14,14 @@ struct ResultView: View {
     var onRemoveFavorite: (Set<String>) -> Void
     var onRemoveClassify: (Set<String>) -> Void
     var onRemoveDelete: (Set<String>) -> Void
+    var onRemoveReview: (Set<String>) -> Void
+    var onExit: () -> Void = {}
 
     @State private var selectedStat: StatType?
     @State private var showDeleteConfirm = false
 
     enum StatType: Identifiable {
-        case delete, keep, favorite, classify
+        case delete, keep, favorite, classify, review
         var id: Self { self }
     }
 
@@ -75,7 +78,12 @@ struct ResultView: View {
 
                     HStack(spacing: 12) {
                         statCard(count: favoritePhotos.count, label: "已收藏", color: .yellow, icon: "star.fill", action: { selectedStat = .favorite })
+                        statCard(count: reviewPhotos.count, label: "待复看", color: .blue, icon: "eye.fill", action: { selectedStat = .review })
+                    }
+
+                    HStack(spacing: 12) {
                         statCard(count: classifyPhotos.count, label: "待分类", color: .orange, icon: "square.grid.2x2", action: { selectedStat = .classify })
+                        Spacer()
                     }
                 }
                 .padding(.horizontal, 20)
@@ -153,6 +161,14 @@ struct ResultView: View {
                                     .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
                             )
                     }
+
+                    Button(action: onExit) {
+                        Text("返回导航")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundColor(.white.opacity(0.5))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                    }
                 }
                 .padding(.horizontal, 28)
                 .padding(.bottom, 30)
@@ -169,6 +185,8 @@ struct ResultView: View {
                 StatDetailView(title: "已收藏", photos: favoritePhotos, onRemove: onRemoveFavorite)
             case .classify:
                 StatDetailView(title: "待分类", photos: classifyPhotos, onRemove: onRemoveClassify)
+            case .review:
+                StatDetailView(title: "待复看", photos: reviewPhotos, onRemove: onRemoveReview)
             }
         }
         .alert("确认删除？", isPresented: $showDeleteConfirm) {
@@ -182,7 +200,7 @@ struct ResultView: View {
     }
 
     private var totalCount: Int {
-        deletePhotos.count + keepPhotos.count + favoritePhotos.count + classifyPhotos.count
+        deletePhotos.count + keepPhotos.count + favoritePhotos.count + classifyPhotos.count + reviewPhotos.count
     }
 
     private func statCard(count: Int, label: String, color: Color, icon: String, action: @escaping () -> Void) -> some View {

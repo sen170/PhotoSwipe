@@ -39,7 +39,7 @@ struct TutorialView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .animation(.spring(response: 0.5, dampingFraction: 0.6), value: step)
+        .animation(.spring(response: 0.35, dampingFraction: 0.7), value: step)
     }
 
     // MARK: - Top Bar
@@ -101,16 +101,30 @@ struct TutorialView: View {
                             .scaleEffect(phase == 1 ? 1.0 : 2.2)
                             .rotationEffect(.degrees(phase == 1 ? 0 : -12))
                             .opacity(phase == 1 ? 1 : 0)
-                            .animation(.spring(response: 0.45, dampingFraction: 0.5), value: phase)
+                            .animation(.spring(response: 0.35, dampingFraction: 0.55), value: phase)
+                    }
+                }
+                // 收藏星星盖戳演示
+                .overlay(alignment: .center) {
+                    if step == 4 && phase > 0 {
+                        starStampView
+                            .scaleEffect(phase == 1 ? 1.0 : 2.2)
+                            .opacity(phase == 1 ? 1 : 0)
+                            .animation(.spring(response: 0.35, dampingFraction: 0.55), value: phase)
                     }
                 }
                 .offset(x: isActive ? dragOffset.width : 0, y: isActive ? dragOffset.height : 0)
                 .rotationEffect(
                     .degrees(isActive ? Double(dragOffset.width / 25) : 0)
                 )
-                .opacity(flyingDirection != nil ? 0.05 : 1)
-                .scaleEffect(flyingDirection != nil ? 0.6 : 1)
+                .opacity(flyingDirection != nil ? 0.1 : 1)
+                .scaleEffect(flyingDirection != nil ? 0.85 : 1)
                 .gesture(isActive && flyingDirection == nil ? dragGesture : nil)
+                .onTapGesture(count: 2) {
+                    if isActive && flyingDirection == nil && step == 4 {
+                        completeStep(dir: .doubleTap)
+                    }
+                }
         }
         .padding(.vertical, 20)
     }
@@ -148,7 +162,7 @@ struct TutorialView: View {
         case 1:
             labelBadge(text: "保留", icon: "checkmark.circle.fill", color: .green, show: dir == .down)
         case 2:
-            labelBadge(text: "收藏", icon: "star.fill", color: .yellow, show: dir == .right)
+            labelBadge(text: "稍后复看", icon: "eye.fill", color: .blue, show: dir == .right)
         case 3:
             labelBadge(text: "待分类", icon: "square.grid.2x2", color: .orange, show: dir == .left)
         default:
@@ -183,6 +197,17 @@ struct TutorialView: View {
         .frame(width: 68, height: 68)
     }
 
+    private var starStampView: some View {
+        ZStack {
+            Circle()
+                .fill(Color.yellow.opacity(0.15))
+            Image(systemName: "star.fill")
+                .font(.system(size: 36, weight: .heavy))
+                .foregroundColor(.yellow)
+        }
+        .frame(width: 80, height: 80)
+    }
+
     // MARK: - Direction Detection
 
     private var currentDirection: SwipeDirection? {
@@ -202,6 +227,7 @@ struct TutorialView: View {
         case 1: return .down
         case 2: return .right
         case 3: return .left
+        case 4: return .doubleTap
         default: return .up
         }
     }
@@ -226,44 +252,46 @@ struct TutorialView: View {
         completed = true
         flyingDirection = dir
 
-        if step == 2 { SoundManager.shared.playFavorite() }
+        if step == 4 { playFavoriteWithStarStamp() }
         else if step == 3 { playClassifyWithStamp() }
+        else if step == 2 { SoundManager.shared.playReview() }
         else if step == 0 { SoundManager.shared.playDelete() }
         else { SoundManager.shared.playKeep() }
 
-        withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
             switch dir {
             case .up: dragOffset.height = -UIScreen.main.bounds.height
             case .down: dragOffset.height = UIScreen.main.bounds.height
             case .left: dragOffset.width = -UIScreen.main.bounds.width
             case .right: dragOffset.width = UIScreen.main.bounds.width
-            default: break
+            case .doubleTap: break
+            case .idle: break
             }
         }
 
-        let delay = step == 3 ? 1.2 : 0.45
+        let delay = (step == 3 || step == 4) ? 0.6 : 0.35
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            if step == 3 {
-                // 第 4 步还在盖戳展示，盖戳动画在本步内，用额外时间后进入结束
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    advanceOrFinish()
-                }
-            } else {
-                advanceOrFinish()
-            }
+            advanceOrFinish()
+        }
+    }
+
+    private func playFavoriteWithStarStamp() {
+        SoundManager.shared.playFavorite()
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.55)) {
+            phase = 1
         }
     }
 
     private func playClassifyWithStamp() {
         SoundManager.shared.playClassify()
-        withAnimation(.spring(response: 0.45, dampingFraction: 0.5)) {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.55)) {
             phase = 1
         }
     }
 
     private func advanceOrFinish() {
         if step < steps.count - 1 {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
                 step += 1
                 completed = false
                 flyingDirection = nil
@@ -327,16 +355,22 @@ struct TutorialStep {
             instruction: "把卡片向下滑，保留你喜欢的照片，它会留在相册里。"
         ),
         TutorialStep(
-            gradient: [Color.yellow.opacity(0.35), Color.orange.opacity(0.5)],
+            gradient: [Color.blue.opacity(0.35), Color.indigo.opacity(0.45)],
             directionIcon: "arrow.right.circle.fill",
-            title: "右滑 = 收藏",
-            instruction: "向右滑进黄色星星，照片会被标记为「个人收藏」并吸入星星。"
+            title: "右滑 = 稍后复看",
+            instruction: "向右滑标记为「稍后复看」，整理完后可在结果页集中查看这些照片。"
         ),
         TutorialStep(
             gradient: [Color.purple.opacity(0.35), Color.blue.opacity(0.45)],
             directionIcon: "arrow.left.circle.fill",
             title: "左滑 = 待分类 + 盖戳",
             instruction: "向左滑进入待分类。整理完删除后，可在相簿页给照片盖戳分类到指定相簿。"
+        ),
+        TutorialStep(
+            gradient: [Color.yellow.opacity(0.35), Color.orange.opacity(0.5)],
+            directionIcon: "hand.tap.fill",
+            title: "双击 = 收藏",
+            instruction: "双击照片即可标记为「个人收藏」，星星弹出的同时自动进入下一张。"
         ),
     ]
 }

@@ -3,6 +3,8 @@ import UIKit
 
 struct SwipeView: View {
     @ObservedObject var service: PhotoService
+    var onExit: () -> Void = {}
+    var onReload: () async -> Void = {}
 
     @State private var dragOffset: CGSize = .zero
     @State private var currentIndex: Int = 0
@@ -12,6 +14,7 @@ struct SwipeView: View {
     @State private var swipedIds: Set<String> = []
     @State private var favoriteIds: Set<String> = []
     @State private var classifyIds: Set<String> = []
+    @State private var reviewIds: Set<String> = []
     @State private var classifySession: ClassifySession?
     @State private var showEarlyFinishConfirm = false
     @State private var showTutorial = false
@@ -23,6 +26,7 @@ struct SwipeView: View {
     private let swipedKey = "swipedPhotoIds"
     private let favoriteKey = "favoritePhotoIds"
     private let classifyKey = "classifyPhotoIds"
+    private let reviewKey = "reviewPhotoIds"
 
     var body: some View {
         ZStack {
@@ -54,6 +58,25 @@ struct SwipeView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .overlay {
+            if showLoadingOverlay {
+                ZStack {
+                    Color.black.opacity(0.9).ignoresSafeArea()
+
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .tint(.white)
+                            .scaleEffect(1.2)
+
+                        Text("正在加载…")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                }
+                .transition(.opacity)
+            }
+        }
         .onAppear {
             loadSwipedState()
         }
@@ -160,6 +183,21 @@ struct SwipeView: View {
 
     private var topBar: some View {
         HStack(spacing: 10) {
+            Button(action: { onExit() }) {
+                Image(systemName: "xmark")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.white.opacity(0.7))
+                    .frame(width: 36, height: 36)
+                    .background(
+                        Circle()
+                            .fill(Color.white.opacity(0.08))
+                    )
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+                    )
+            }
+
             Button(action: { showEarlyFinishConfirm = true }) {
                 HStack(spacing: 6) {
                     Image(systemName: "flag.checkered")
@@ -283,7 +321,8 @@ struct SwipeView: View {
                         onSwipeUp: { handleSwipe(.up) },
                         onSwipeDown: { handleSwipe(.down) },
                         onSwipeLeft: { handleSwipe(.left) },
-                        onSwipeRight: { handleSwipe(.right) }
+                        onSwipeRight: { handleSwipe(.right) },
+                        onDoubleTapFavorite: { handleDoubleTapFavorite() }
                     )
                     .frame(width: fittedCardWidth(photo), height: fittedCardHeight(photo))
                     .scaleEffect(flyScale(for: depth))
@@ -344,6 +383,11 @@ struct SwipeView: View {
     }
 
     private var currentGroupFavoritePhotos: [PhotoItem] {
+        let ids = Set(actions.filter { $0.direction == .doubleTap }.map { $0.photoId })
+        return service.photos.filter { ids.contains($0.id) }
+    }
+
+    private var currentGroupReviewPhotos: [PhotoItem] {
         let ids = Set(actions.filter { $0.direction == .right }.map { $0.photoId })
         return service.photos.filter { ids.contains($0.id) }
     }
@@ -370,6 +414,7 @@ struct SwipeView: View {
             keepPhotos: currentGroupKeepPhotos,
             favoritePhotos: currentGroupFavoritePhotos,
             classifyPhotos: currentGroupClassifyPhotos,
+            reviewPhotos: currentGroupReviewPhotos,
             onConfirmDelete: {
                 Task {
                     let success = await service.batchDelete()
@@ -387,7 +432,7 @@ struct SwipeView: View {
                 actions.removeAll { $0.direction == .down && ids.contains($0.photoId) }
             },
             onRemoveFavorite: { ids in
-                actions.removeAll { $0.direction == .right && ids.contains($0.photoId) }
+                actions.removeAll { $0.direction == .doubleTap && ids.contains($0.photoId) }
                 for photo in service.photos.filter({ ids.contains($0.id) }) {
                     Task { await service.unmarkAsFavorite(photo.asset) }
                 }
@@ -399,6 +444,10 @@ struct SwipeView: View {
                 actions.removeAll { $0.direction == .up && ids.contains($0.photoId) }
                 service.removeFromPendingDeletes(ids)
             },
+            onRemoveReview: { ids in
+                actions.removeAll { $0.direction == .right && ids.contains($0.photoId) }
+            },
+            onExit: onExit,
         )
     }
 
@@ -414,8 +463,10 @@ struct SwipeView: View {
             timestamp: Date()
         )
         actions.append(action)
-        swipedIds.insert(photo.id)
-        saveSwipedState()
+        if direction != .right {
+            swipedIds.insert(photo.id)
+            saveSwipedState()
+        }
         flyingDirection = direction
 
         switch direction {
@@ -427,20 +478,47 @@ struct SwipeView: View {
             SoundManager.shared.playKeep()
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         case .right:
-            SoundManager.shared.playFavorite()
+            SoundManager.shared.playReview()
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            favoriteIds.insert(photo.id)
-            saveFavoriteState()
-            Task {
-                await service.markAsFavorite(photo.asset)
-            }
+            reviewIds.insert(photo.id)
+            saveReviewState()
         case .left:
             SoundManager.shared.playClassify()
             UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
             classifyIds.insert(photo.id)
             saveClassifyState()
-        case .idle:
+        case .idle, .doubleTap:
             break
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            dragOffset = .zero
+            flyingDirection = .idle
+            currentIndex += 1
+            Task {
+                await service.preloadNext(currentIndex: currentIndex)
+            }
+        }
+    }
+
+    private func handleDoubleTapFavorite() {
+        guard currentIndex < service.photos.count else { return }
+
+        let photo = service.photos[currentIndex]
+        let action = SwipeAction(
+            photoId: photo.id,
+            direction: .doubleTap,
+            timestamp: Date()
+        )
+        actions.append(action)
+        swipedIds.insert(photo.id)
+        saveSwipedState()
+        favoriteIds.insert(photo.id)
+        saveFavoriteState()
+        flyingDirection = .doubleTap
+
+        Task {
+            await service.markAsFavorite(photo.asset)
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
@@ -469,6 +547,9 @@ struct SwipeView: View {
         case .up:
             service.removeFromPendingDeletes([lastAction.photoId])
         case .right:
+            reviewIds.remove(lastAction.photoId)
+            saveReviewState()
+        case .doubleTap:
             favoriteIds.remove(lastAction.photoId)
             saveFavoriteState()
             Task { await service.unmarkAsFavorite(photo.asset) }
@@ -488,7 +569,8 @@ struct SwipeView: View {
         actions = []
         showLoadingOverlay = true
         Task {
-            await service.loadPhotos(swipedIds: swipedIds)
+            await onReload()
+            showLoadingOverlay = false
         }
     }
 
@@ -512,6 +594,9 @@ struct SwipeView: View {
         if let saved = UserDefaults.standard.array(forKey: classifyKey) as? [String] {
             classifyIds = Set(saved)
         }
+        if let saved = UserDefaults.standard.array(forKey: reviewKey) as? [String] {
+            reviewIds = Set(saved)
+        }
     }
 
     private func saveSwipedState() {
@@ -524,6 +609,10 @@ struct SwipeView: View {
 
     private func saveClassifyState() {
         UserDefaults.standard.set(Array(classifyIds), forKey: classifyKey)
+    }
+
+    private func saveReviewState() {
+        UserDefaults.standard.set(Array(reviewIds), forKey: reviewKey)
     }
 
     // MARK: - Flying Animation
@@ -539,6 +628,8 @@ struct SwipeView: View {
             return CGSize(width: -UIScreen.main.bounds.width, height: 0)
         case .right:
             return CGSize(width: UIScreen.main.bounds.width, height: 0)
+        case .doubleTap:
+            return .zero
         case .idle:
             return .zero
         }
@@ -550,7 +641,7 @@ struct SwipeView: View {
     }
 
     private func flyScale(for depth: Int) -> CGFloat {
-        guard depth == 0 && (flyingDirection == .right || flyingDirection == .left) else { return 1.0 }
+        guard depth == 0 && (flyingDirection == .right || flyingDirection == .left || flyingDirection == .doubleTap) else { return 1.0 }
         return 0.01
     }
 }

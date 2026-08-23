@@ -50,6 +50,10 @@ final class SoundManager {
         play("classify")
     }
 
+    func playReview() {
+        play("keep")
+    }
+
     private func play(_ name: String) {
         guard let player = players[name] else { return }
         player.currentTime = 0

@@ -12,6 +12,9 @@ struct PhotoCardView: View {
     var onSwipeDown: () -> Void
     var onSwipeLeft: () -> Void
     var onSwipeRight: () -> Void
+    var onDoubleTapFavorite: () -> Void
+
+    @State private var showFavoriteStamp = false
 
     private let swipeThreshold: CGFloat = 100
 
@@ -50,6 +53,8 @@ struct PhotoCardView: View {
             }
 
             overlay
+
+            favoriteStampOverlay
         }
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(alignment: .bottom) {
@@ -67,6 +72,12 @@ struct PhotoCardView: View {
         .scaleEffect(scaleAmount)
         .contentShape(Rectangle())
         .gesture(dragGesture)
+        .simultaneousGesture(
+            TapGesture(count: 2)
+                .onEnded {
+                    triggerFavoriteStamp()
+                }
+        )
     }
 
     private var dragGesture: some Gesture {
@@ -118,7 +129,7 @@ struct PhotoCardView: View {
                 labelBadge(text: "保留", color: .green, icon: "checkmark.circle.fill")
                     .transition(.scale.combined(with: .opacity))
             } else if direction == .right {
-                labelBadge(text: "收藏", color: .yellow, icon: "star.fill")
+                labelBadge(text: "稍后复看", color: .blue, icon: "eye.fill")
                     .transition(.scale.combined(with: .opacity))
             } else if direction == .left {
                 labelBadge(text: "待分类", color: .orange, icon: "square.grid.2x2")
@@ -146,5 +157,43 @@ struct PhotoCardView: View {
                 .stroke(Color.white.opacity(0.25), lineWidth: 0.5)
         )
         .shadow(color: color.opacity(0.3), radius: 12, x: 0, y: 6)
+    }
+
+    // MARK: - Double-Tap Favorite Stamp
+
+    private func triggerFavoriteStamp() {
+        SoundManager.shared.playFavorite()
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
+            showFavoriteStamp = true
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            withAnimation(.easeOut(duration: 0.3)) {
+                showFavoriteStamp = false
+            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            onDoubleTapFavorite()
+        }
+    }
+
+    @ViewBuilder
+    private var favoriteStampOverlay: some View {
+        if showFavoriteStamp {
+            ZStack {
+                Circle()
+                    .fill(Color.yellow.opacity(0.12))
+                    .frame(width: 160, height: 160)
+
+                Image(systemName: "star.fill")
+                    .font(.system(size: 80))
+                    .foregroundColor(.yellow)
+                    .shadow(color: .yellow.opacity(0.6), radius: 20, x: 0, y: 6)
+            }
+            .transition(.scale.combined(with: .opacity))
+        }
     }
 }

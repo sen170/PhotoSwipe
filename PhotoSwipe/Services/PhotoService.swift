@@ -132,6 +132,29 @@ final class PhotoService: ObservableObject {
         }
     }
 
+    /// 中等尺寸图（用于月历封面，300x300）
+    func requestMediumImage(for asset: PHAsset) async -> UIImage? {
+        let imageManager = PHImageManager.default()
+        let targetSize = CGSize(width: 300, height: 300)
+
+        let options = PHImageRequestOptions()
+        options.isSynchronous = false
+        options.deliveryMode = .highQualityFormat
+        options.resizeMode = .fast
+        options.isNetworkAccessAllowed = true
+
+        return await withCheckedContinuation { continuation in
+            imageManager.requestImage(
+                for: asset,
+                targetSize: targetSize,
+                contentMode: .aspectFill,
+                options: options
+            ) { image, _ in
+                continuation.resume(returning: image)
+            }
+        }
+    }
+
     func markForDeletion(_ item: PhotoItem) {
         pendingDeletes.append(item)
     }
@@ -192,6 +215,189 @@ final class PhotoService: ObservableObject {
             ))
         }
         return albums
+    }
+
+    // MARK: - Monthly Groups
+
+    func getMonthlyGroups(swipedIds: Set<String> = []) async -> [MonthlyGroup] {
+        guard hasPermission else { return [] }
+
+        let fetchOptions = PHFetchOptions()
+        fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+
+        let result = PHAsset.fetchAssets(with: .image, options: fetchOptions)
+
+        var monthMap: [String: (assets: [PHAsset], count: Int)] = [:]
+        var monthOrder: [String] = []
+
+        result.enumerateObjects { asset, _, _ in
+            guard let date = asset.creationDate else { return }
+            let cal = Calendar.current
+            let year = cal.component(.year, from: date)
+            let month = cal.component(.month, from: date)
+            let key = String(format: "%d-%02d", year, month)
+
+            if monthMap[key] == nil {
+                monthMap[key] = (assets: [], count: 0)
+                monthOrder.append(key)
+            }
+            monthMap[key]?.assets.append(asset)
+            monthMap[key]?.count += 1
+        }
+
+        var groups: [MonthlyGroup] = []
+        for key in monthOrder {
+            let parts = key.split(separator: "-")
+            guard parts.count == 2,
+                  let year = Int(parts[0]),
+                  let month = Int(parts[1]) else { continue }
+
+            let assets = monthMap[key]?.assets ?? []
+            let unswipedCount = assets.filter { !swipedIds.contains($0.localIdentifier) }.count
+            guard unswipedCount > 0 else { continue }
+
+            let coverAsset = assets.first
+            var coverImage: UIImage?
+            if let cover = coverAsset {
+                coverImage = await requestMediumImage(for: cover)
+            }
+
+            groups.append(MonthlyGroup(
+                id: key,
+                year: year,
+                month: month,
+                photoCount: unswipedCount,
+                coverImage: coverImage,
+                coverAsset: coverAsset
+            ))
+        }
+
+        return groups
+    }
+
+    func loadPhotosForMonth(year: Int, month: Int, swipedIds: Set<String> = []) async {
+        guard hasPermission else { return }
+
+        isLoading = true
+
+        let cal = Calendar.current
+        let components = DateComponents(year: year, month: month)
+        guard let startOfMonth = cal.date(from: components),
+              let endOfMonth = cal.date(byAdding: .month, value: 1, to: startOfMonth) else {
+            isLoading = false
+            return
+        }
+
+        let fetchOptions = PHFetchOptions()
+        let predicate = NSPredicate(format: "creationDate >= %@ AND creationDate < %@",
+                                    startOfMonth as NSDate, endOfMonth as NSDate)
+        fetchOptions.predicate = predicate
+        fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+
+        let result = PHAsset.fetchAssets(with: .image, options: fetchOptions)
+
+        var assets: [PHAsset] = []
+        result.enumerateObjects { asset, _, _ in
+            assets.append(asset)
+        }
+
+        let unswipedAssets = assets.filter { !swipedIds.contains($0.localIdentifier) }
+        let batchAssets = Array(unswipedAssets.prefix(batchSize))
+
+        await loadLazy(batchAssets)
+    }
+
+    func loadShuffledPhotos(swipedIds: Set<String> = []) async {
+        guard hasPermission else { return }
+
+        isLoading = true
+
+        let fetchOptions = PHFetchOptions()
+        fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+
+        let result = PHAsset.fetchAssets(with: .image, options: fetchOptions)
+
+        var assets: [PHAsset] = []
+        result.enumerateObjects { asset, _, _ in
+            assets.append(asset)
+        }
+
+        let unswipedAssets = assets.filter { !swipedIds.contains($0.localIdentifier) }
+        let shuffled = unswipedAssets.shuffled()
+        let batchAssets = Array(shuffled.prefix(batchSize))
+
+        await loadLazy(batchAssets)
+    }
+
+    func getRandomCovers(count: Int = 3) async -> [UIImage] {
+        guard hasPermission else { return [] }
+
+        let fetchOptions = PHFetchOptions()
+        fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+
+        let result = PHAsset.fetchAssets(with: .image, options: fetchOptions)
+
+        var assets: [PHAsset] = []
+        result.enumerateObjects { asset, _, _ in
+            assets.append(asset)
+        }
+
+        let shuffled = assets.shuffled()
+        let covers = Array(shuffled.prefix(count))
+
+        var images: [UIImage] = []
+        for asset in covers {
+            if let image = await requestMediumImage(for: asset) {
+                images.append(image)
+            }
+        }
+
+        return images
+    }
+
+    private func loadLazy(_ assets: [PHAsset]) async {
+        guard !assets.isEmpty else {
+            isLoading = false
+            return
+        }
+
+        let initialCount = min(10, assets.count)
+        let initialAssets = Array(assets.prefix(initialCount))
+        let remainingAssets = Array(assets.dropFirst(initialCount))
+
+        var initialPhotos = initialAssets.map { asset -> PhotoItem in
+            let pw = asset.pixelWidth
+            let ph = asset.pixelHeight
+            let ratio = ph > 0 ? CGFloat(pw) / CGFloat(ph) : 3.0 / 4.0
+            return PhotoItem(id: asset.localIdentifier, asset: asset, uiImage: nil, aspectRatio: ratio)
+        }
+
+        totalCount = assets.count
+        loadedCount = 0
+
+        for i in 0..<initialPhotos.count {
+            initialPhotos[i].uiImage = await requestImage(for: initialPhotos[i].asset)
+            initialPhotos[i].thumbnailImage = await requestThumbnail(for: initialPhotos[i].asset)
+            loadedCount = i + 1
+        }
+
+        photos = initialPhotos
+        isLoading = false
+
+        Task { @MainActor [weak self] in
+            guard let self = self else { return }
+            for asset in remainingAssets {
+                let pw = asset.pixelWidth
+                let ph = asset.pixelHeight
+                let ratio = ph > 0 ? CGFloat(pw) / CGFloat(ph) : 3.0 / 4.0
+                var photo = PhotoItem(id: asset.localIdentifier, asset: asset, uiImage: nil, aspectRatio: ratio)
+                photo.uiImage = await self.requestImage(for: asset)
+                photo.thumbnailImage = await self.requestThumbnail(for: asset)
+
+                self.photos.append(photo)
+                self.loadedCount += 1
+            }
+        }
     }
 
     func addToAlbum(_ asset: PHAsset, album: PHAssetCollection) async -> Bool {
